@@ -1,4 +1,12 @@
-// Placeholder for examples/demo-worker.ts
-// User will provide the actual implementation
+import { Multithreaded } from '@/multithreaded'
 
-console.log('Demo worker');
+const ctx = Multithreaded.workerContext()
+
+ctx.post({ type: 'ready', id: ctx.id })
+
+ctx.onMessage((msg: any) => {
+    if (msg.type === 'ping')
+        ctx.post({ type: 'pong', n: msg.n, from: ctx.id })
+})
+
+setInterval(() => process.stdout.write('+'), 250)
