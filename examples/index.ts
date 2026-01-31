@@ -1,9 +1,6 @@
 import { randomUUID } from 'crypto'
-import {
-    Multithreaded,
-    IThreadObserver,
-    IThreadedWorker,
-} from '@/multithreaded'
+import { Multithreaded } from '@/multithreaded'
+import { IThreadedWorker, IThreadObserver } from '@/types'
 
 class MessageObserver implements IThreadObserver {
     onWorkerCreated(worker: IThreadedWorker) {
@@ -28,7 +25,7 @@ class MessageObserver implements IThreadObserver {
 
 Multithreaded.main(() => {
     console.log('[main] started')
-    Multithreaded.setObserver(new MessageObserver())
+    Multithreaded.bindObserverAll(new MessageObserver())
 
     const w1 = Multithreaded.addWorker(randomUUID(), (ctx) => {
         ctx.post({ type: 'ready', id: ctx.id })

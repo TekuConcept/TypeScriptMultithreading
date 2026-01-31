@@ -5,65 +5,133 @@ import {
     parentPort,
     workerData,
 } from 'worker_threads'
+import {
+    CreateWorkerOptions,
+    IThreadedWorker,
+    IThreadObserver,
+    ObserverInstance,
+    WorkerContext,
+    WorkerFunction,
+    WorkerHandlers,
+} from './types'
 
 const isDev = process.env.NODE_ENV === 'development'
-
-export interface IThreadedWorker {
-    id: string
-    instance: Worker
-}
-
-export interface IThreadObserver {
-    onWorkerCreated?: (worker: IThreadedWorker) => void
-    onMessage?: (data: any, worker: IThreadedWorker) => void
-    onError?: (error: Error,  worker: IThreadedWorker) => void
-    onExit?: (code: number, worker: IThreadedWorker) => void
-}
-
-export interface WorkerContext {
-    id: string
-    userData: any
-    post: (msg: any) => void
-    onMessage: (handler: (value: any) => void) => void
-}
-
-export interface CreateWorkerOptions {
-    data?: any
-}
-
-export type WorkerFunction = (ctx: WorkerContext) => void
 
 /*********************************************************\
  * Multithreaded Main Thread Abstraction
 \*********************************************************/
 
-let _observer: IThreadObserver | null = null
+let _observers: ObserverInstance[] = []
 let _workers: IThreadedWorker[] = []
 
 export namespace Multithreaded {
     /**
-     * Set or clear the global thread observer. The observer
-     * will receive lifecycle events from all created workers
-     * including which worker the event originated from.
-     * @param observer Observer instance or null to clear
+     * Binds a single observer to the specified worker.
+     * @param observer The observer to bind
+     * @param worker The worker to observe
      */
-    export function setObserver(observer: IThreadObserver | null) {
-        // NOTE: This is essentially a noop for worker threads,
-        //       as they don't manage other workers.
+    export function bindObserver(
+        observer: IThreadObserver,
+        worker: IThreadedWorker
+    ) {
+        // Ignore if same observer
+        const existingObserver = _observers.find(
+            o => o.instance === observer)
+        // Ignore if already observing this worker
+        const existingWorker = existingObserver?.workers.find(
+            w => w.instance === worker)
+        if (existingWorker) return
 
-        _workers.forEach(worker => {
-            // Detach existing observer
-            // TODO: maybe store original handlers so when added
-            //       so we don't remove user-defined handlers?
-            worker.instance.removeAllListeners('message')
-            worker.instance.removeAllListeners('error')
-            worker.instance.removeAllListeners('exit')
+        const workerHandlers = createWorkerHandlers(
+            existingObserver!,
+            worker,
+        )
 
-            // Attach new observer
-            attachLifecycle(worker)
+        worker.instance.on('message', workerHandlers.handlers.message)
+        worker.instance.on('error', workerHandlers.handlers.error)
+        worker.instance.on('exit', workerHandlers.handlers.exit)
+
+        if (existingObserver)
+            existingObserver.workers.push(workerHandlers)
+        else {
+            _observers.push({
+                instance: observer,
+                workers: [workerHandlers],
+            })
+        }
+    }
+
+    /**
+     * Unbinds a single observer from the specified worker.
+     * @param observer The observer to unbind
+     * @param worker The worker to stop observing
+     */
+    export function unbindObserver(
+        observer: IThreadObserver,
+        worker: IThreadedWorker
+    ) {
+        // Find existing observer
+        const existingObserver = _observers.find(
+            o => o.instance === observer)
+        if (!existingObserver) return
+
+        // Find existing worker
+        const existingWorker = existingObserver.workers.find(
+            w => w.instance === worker)
+        if (!existingWorker) return
+
+        existingWorker.instance.instance
+            .off('message', existingWorker.handlers.message)
+        existingWorker.instance.instance
+            .off('error', existingWorker.handlers.error)
+        existingWorker.instance.instance
+            .off('exit', existingWorker.handlers.exit)
+
+        const wIdx = existingObserver.workers.indexOf(existingWorker)
+        if (wIdx >= 0)
+            existingObserver.workers.splice(wIdx, 1)
+
+        // If no more workers, remove observer entirely
+        if (existingObserver.workers.length === 0 &&
+            !existingObserver.global
+        ) {
+            const oIdx = _observers.indexOf(existingObserver)
+            if (oIdx >= 0) _observers.splice(oIdx, 1)
+        }
+    }
+
+    /**
+     * Binds an observer to all current and future workers.
+     * @param observer The observer to bind
+     */
+    export function bindObserverAll(observer: IThreadObserver) {
+        _observers.push({
+            global: true,
+            instance: observer,
+            workers: [],
         })
 
-        _observer = observer || null
+        for (const worker of _workers)
+            bindObserver(observer, worker)
+    }
+
+    /**
+     * Unbinds an observer from all workers.
+     * Automatically disables future bindings
+     * and removes the observer if no workers remain.
+     * @param observer The observer to unbind
+     */
+    export function unbindObserverAll(observer: IThreadObserver) {
+        const existingObserver = _observers.find(
+            o => o.instance === observer)
+        if (!existingObserver) return
+
+        // Disable automatic global binding
+        // This will automatically be removed if no workers remain
+        existingObserver.global = false
+
+        for (const worker of existingObserver.workers)
+            unbindObserver(observer, worker.instance)
     }
 
     /**
@@ -110,8 +178,7 @@ export namespace Multithreaded {
         })
 
         const worker = { id, instance }
-        attachLifecycle(worker)
-        _workers.push(worker)
+        postAddWorkerSetup(worker)
 
         return worker
     }
@@ -162,8 +229,7 @@ export namespace Multithreaded {
         )
 
         const worker = { id, instance }
-        attachLifecycle(worker)
-        _workers.push(worker)
+        postAddWorkerSetup(worker)
 
         return worker
     }
@@ -239,16 +305,37 @@ export namespace Multithreaded {
     }
 }
 
-function attachLifecycle(worker: IThreadedWorker) {
-    const obs = _observer
-    if (obs?.onWorkerCreated) obs.onWorkerCreated(worker)
+function createWorkerHandlers(
+    owner: ObserverInstance,
+    worker: IThreadedWorker,
+): WorkerHandlers {
+    return {
+        instance: worker,
+        handlers: {
+            message: (data: any) => owner.instance.onMessage?.(data, worker),
+            error: (error: Error) => owner.instance.onError?.(error, worker),
+            exit: (code: number) => owner.instance.onExit?.(code, worker),
+        },
+    }
+}
 
-    worker.instance.on('message', data =>
-        obs?.onMessage?.(data, worker))
-    worker.instance.on('error', err =>
-        obs?.onError?.(err, worker))
-    worker.instance.on('exit', code =>
-        obs?.onExit?.(code, worker))
+function postAddWorkerSetup(
+    worker: IThreadedWorker
+) {
+    _workers.push(worker)
+    attachLifecycle(worker)
+}
+
+function attachLifecycle(worker: IThreadedWorker) {
+    const globalObservers = _observers.filter(o => o.global)
+    for (const obs of globalObservers) {
+        const alreadyBound = obs.workers.find(w => w.instance === worker)
+        if (!alreadyBound)
+            Multithreaded.bindObserver(obs.instance, worker)
+
+        if (obs.instance.onWorkerCreated)
+            obs.instance.onWorkerCreated(worker)
+    }
 }
 
 /**
