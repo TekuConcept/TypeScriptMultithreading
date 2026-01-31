@@ -1,0 +1,23 @@
+{
+  "name": "typescript-multithreading",
+  "version": "1.0.0",
+  "description": "Simple example setup for running multithreaded tasks in NodeJS using TypeScript",
+  "main": "index.js",
+  "scripts": {
+    "examples": "ts-node -r tsconfig-paths/register --project tsconfig.json ./examples/index.ts"
+  },
+  "keywords": [
+    "typescript",
+    "multithreading",
+    "worker",
+    "nodejs"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "ts-node": "^10.9.0",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.0.0"
+  }
+}
