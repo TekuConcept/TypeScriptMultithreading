@@ -5,15 +5,16 @@ import {
     parentPort,
     workerData,
 } from 'worker_threads'
+import { FileInfo } from './fileinfo.js'
 import {
     CreateWorkerOptions,
-    IThreadedWorker,
+    ThreadedWorker,
     IThreadObserver,
     ObserverInstance,
     WorkerContext,
     WorkerFunction,
     WorkerHandlers,
-} from './types'
+} from './types.js'
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -22,292 +23,305 @@ const isDev = process.env.NODE_ENV === 'development'
 \*********************************************************/
 
 let _observers: ObserverInstance[] = []
-let _workers: IThreadedWorker[] = []
+let _workers: ThreadedWorker[] = []
 
-export namespace Multithreaded {
-    /**
-     * Binds a single observer to the specified worker.
-     * @param observer The observer to bind
-     * @param worker The worker to observe
-     */
-    export function bindObserver(
-        observer: IThreadObserver,
-        worker: IThreadedWorker
-    ) {
-        // Ignore if same observer
-        const existingObserver = _observers.find(
-            o => o.instance === observer)
-        // Ignore if already observing this worker
-        const existingWorker = existingObserver?.workers.find(
-            w => w.instance === worker)
-        if (existingWorker) return
+/**
+ * Binds a single observer to the specified worker.
+ * @param observer The observer to bind
+ * @param worker The worker to observe
+ */
+export function bindObserver(
+    observer: IThreadObserver,
+    worker: ThreadedWorker
+): void {
+    // Ignore if same observer
+    const existingObserver = _observers.find(
+        o => o.instance === observer)
+    // Ignore if already observing this worker
+    const existingWorker = existingObserver?.workers.find(
+        w => w.instance === worker)
+    if (existingWorker) return
 
-        const workerHandlers = createWorkerHandlers(
-            existingObserver!,
-            worker,
-        )
+    const workerHandlers = createWorkerHandlers(
+        existingObserver!,
+        worker,
+    )
 
-        worker.instance.on('message', workerHandlers.handlers.message)
-        worker.instance.on('error', workerHandlers.handlers.error)
-        worker.instance.on('exit', workerHandlers.handlers.exit)
+    worker.instance.on('message', workerHandlers.handlers.message)
+    worker.instance.on('error', workerHandlers.handlers.error)
+    worker.instance.on('exit', workerHandlers.handlers.exit)
 
-        if (existingObserver)
-            existingObserver.workers.push(workerHandlers)
-        else {
-            _observers.push({
-                instance: observer,
-                workers: [workerHandlers],
-            })
-        }
-    }
-
-    /**
-     * Unbinds a single observer from the specified worker.
-     * @param observer The observer to unbind
-     * @param worker The worker to stop observing
-     */
-    export function unbindObserver(
-        observer: IThreadObserver,
-        worker: IThreadedWorker
-    ) {
-        // Find existing observer
-        const existingObserver = _observers.find(
-            o => o.instance === observer)
-        if (!existingObserver) return
-
-        // Find existing worker
-        const existingWorker = existingObserver.workers.find(
-            w => w.instance === worker)
-        if (!existingWorker) return
-
-        existingWorker.instance.instance
-            .off('message', existingWorker.handlers.message)
-        existingWorker.instance.instance
-            .off('error', existingWorker.handlers.error)
-        existingWorker.instance.instance
-            .off('exit', existingWorker.handlers.exit)
-
-        const wIdx = existingObserver.workers.indexOf(existingWorker)
-        if (wIdx >= 0)
-            existingObserver.workers.splice(wIdx, 1)
-
-        // If no more workers, remove observer entirely
-        if (existingObserver.workers.length === 0 &&
-            !existingObserver.global
-        ) {
-            const oIdx = _observers.indexOf(existingObserver)
-            if (oIdx >= 0) _observers.splice(oIdx, 1)
-        }
-    }
-
-    /**
-     * Binds an observer to all current and future workers.
-     * @param observer The observer to bind
-     */
-    export function bindObserverAll(observer: IThreadObserver) {
+    if (existingObserver)
+        existingObserver.workers.push(workerHandlers)
+    else {
         _observers.push({
-            global: true,
             instance: observer,
-            workers: [],
+            workers: [workerHandlers],
         })
-
-        for (const worker of _workers)
-            bindObserver(observer, worker)
-    }
-
-    /**
-     * Unbinds an observer from all workers.
-     * Automatically disables future bindings
-     * and removes the observer if no workers remain.
-     * @param observer The observer to unbind
-     */
-    export function unbindObserverAll(observer: IThreadObserver) {
-        const existingObserver = _observers.find(
-            o => o.instance === observer)
-        if (!existingObserver) return
-
-        // Disable automatic global binding
-        // This will automatically be removed if no workers remain
-        existingObserver.global = false
-
-        for (const worker of existingObserver.workers)
-            unbindObserver(observer, worker.instance)
-    }
-
-    /**
-     * Run the provided function on the main thread.
-     * This is considered the main entry point for
-     * multithreaded applications.
-     */
-    export function main(fn: Function)
-    { if (isMainThread) fn() }
-
-    /**
-     * Create a new worker thread running the provided function.
-     * @param id Worker identifier
-     * @param fn Function to run in the worker
-     * @param options Creation options eg data to pass to the worker
-     * @returns Worker instance wrapper
-     * @throws If not called from main thread or fn is not a function
-     */
-    export function addWorker(
-        id: string,
-        fn: WorkerFunction,
-        options: CreateWorkerOptions = {},
-    ) {
-        if (!isMainThread) throw new Error(
-            'addWorker() can only be called on the main thread')
-        if (typeof fn !== 'function') throw new TypeError(
-            'addWorker(fn, ...) expects a function')
-
-        // We run a tiny worker bootstrapper (this same module file),
-        // and pass the user function as a string for evaluation in the worker.
-        // const bootstrap = path.join(__dirname, 'multithreaded.js')
-        const bootstrap = __filename
-        const execArgv = getExecArgvForFile(bootstrap)
-        const env = getEnvForFile(bootstrap)
-
-        const instance = new Worker(bootstrap, {
-            execArgv, env,
-            workerData: {
-                __mt_kind: 'inlineFn',
-                id,
-                fnSource: fn.toString(),
-                userData: options.data ?? null,
-            },
-        })
-
-        const worker = { id, instance }
-        postAddWorkerSetup(worker)
-
-        return worker
-    }
-
-    /**
-     * Create a new worker thread running the specified file.
-     * @param id Worker identifier
-     * @param filename Path to worker file
-     * @param options Creation options eg data to pass to the worker
-     * @returns Worker instance wrapper
-     * @throws If not called from main thread or file not found
-     */
-    export function addWorkerFile(
-        id: string,
-        filename: string,
-        relativeTo?: string,
-        options: CreateWorkerOptions = {},
-    ) {
-        if (!isMainThread) throw new Error(
-            'addWorkerFile() can only be called on the main thread'
-        )
-
-        const unifiedFilename = unifyFilename(filename, relativeTo)
-        const execArgv = getExecArgvForFile(unifiedFilename)
-        const env = getEnvForFile(unifiedFilename)
-
-        const instance = new Worker(
-            /**
-             * NOTE: We use a small bootstrap file to set up
-             *       the environment (eg ts-node) before
-             *       loading the actual worker file.
-             * 
-             * While technically we could pass the filename
-             * directly to the Worker constructor, this helps
-             * ensure that workers can run TypeScript files
-             * directly when needed - avoiding any gotchas
-             * with module resolution or runtime setup.
-             */
-            path.resolve(__dirname, 'worker-bootstrap.js'),
-            {
-                execArgv,
-                env: { ...env, MT_WORKER_ENTRY: unifiedFilename },
-                workerData: {
-                    id,
-                    userData: options.data ?? null
-                },
-            }
-        )
-
-        const worker = { id, instance }
-        postAddWorkerSetup(worker)
-
-        return worker
-    }
-
-    export function getWorkers(): IThreadedWorker[]
-    { return _workers.slice() }
-
-    /**
-     * Terminate workers matching the selector.
-     * If no selector is provided, terminates all workers.
-     * 
-     * Use this to forcefully stop workers when they are
-     * no longer needed. For a more graceful shutdown, consider
-     * sending a custom message to the worker and letting it
-     * exit on its own.
-     * 
-     * @param selector Function to select workers to terminate.
-     */
-    export function terminateWorkers(
-        selector?: (worker: IThreadedWorker) => boolean
-    ) {
-        const toRelease = selector
-            ? _workers.filter(selector)
-            : _workers.slice()
-        for (const worker of toRelease) {
-            worker.instance.terminate()
-            const idx = _workers.indexOf(worker)
-            if (idx >= 0) _workers.splice(idx, 1)
-        }
-    }
-
-    /**
-     * Detach workers matching the selector from the
-     * internal worker list without terminating them.
-     * If no selector is provided, detaches all workers.
-     * 
-     * Use this to remove workers from management when
-     * you want them to continue running independently
-     * without keeping the main thread alive.
-     * 
-     * @param selector Function to select workers to detach.
-     */
-    export function detachWorkers(
-        selector?: (worker: IThreadedWorker) => boolean
-    ) {
-        const toDetach = selector
-            ? _workers.filter(selector)
-            : _workers.slice()
-        for (const worker of toDetach) {
-            const idx = _workers.indexOf(worker)
-            if (idx >= 0) _workers.splice(idx, 1)
-        }
-    }
-
-    /**
-     * Get the worker context when running inside a worker thread.
-     * @returns Worker context
-     * @throws If not called inside a worker thread
-     */
-    export function workerContext() {
-        if (isMainThread) throw new Error(
-            'workerContext() can only be used inside a worker'
-        )
-
-        return {
-            id: workerData?.id,
-            userData: workerData?.userData ?? null,
-            post: (msg: any) => parentPort!.postMessage(msg),
-            onMessage: (
-                handler: ((value: any) => void)
-            ) => parentPort!.on('message', handler),
-        }
     }
 }
 
+/**
+ * Unbinds a single observer from the specified worker.
+ * @param observer The observer to unbind
+ * @param worker The worker to stop observing
+ */
+export function unbindObserver(
+    observer: IThreadObserver,
+    worker: ThreadedWorker
+): void {
+    // Find existing observer
+    const existingObserver = _observers.find(
+        o => o.instance === observer)
+    if (!existingObserver) return
+
+    // Find existing worker
+    const existingWorker = existingObserver.workers.find(
+        w => w.instance === worker)
+    if (!existingWorker) return
+
+    existingWorker.instance.instance
+        .off('message', existingWorker.handlers.message)
+    existingWorker.instance.instance
+        .off('error', existingWorker.handlers.error)
+    existingWorker.instance.instance
+        .off('exit', existingWorker.handlers.exit)
+
+    const wIdx = existingObserver.workers.indexOf(existingWorker)
+    if (wIdx >= 0)
+        existingObserver.workers.splice(wIdx, 1)
+
+    // If no more workers, remove observer entirely
+    if (existingObserver.workers.length === 0 &&
+        !existingObserver.global
+    ) {
+        const oIdx = _observers.indexOf(existingObserver)
+        if (oIdx >= 0) _observers.splice(oIdx, 1)
+    }
+}
+
+/**
+ * Binds an observer to all current and future workers.
+ * @param observer The observer to bind
+ */
+export function bindObserverAll(observer: IThreadObserver): void {
+    _observers.push({
+        global: true,
+        instance: observer,
+        workers: [],
+    })
+
+    for (const worker of _workers)
+        bindObserver(observer, worker)
+}
+
+/**
+ * Unbinds an observer from all workers.
+ * Automatically disables future bindings
+ * and removes the observer if no workers remain.
+ * @param observer The observer to unbind
+ */
+export function unbindObserverAll(observer: IThreadObserver): void {
+    const existingObserver = _observers.find(
+        o => o.instance === observer)
+    if (!existingObserver) return
+
+    // Disable automatic global binding
+    // This will automatically be removed if no workers remain
+    existingObserver.global = false
+
+    for (const worker of existingObserver.workers)
+        unbindObserver(observer, worker.instance)
+}
+
+/**
+ * Run the provided function on the main thread.
+ * This is considered the main entry point for
+ * multithreaded applications.
+ */
+export function main(fn: Function): void
+{ if (isMainThread) fn() }
+
+/**
+ * Create a new worker thread running the provided function.
+ * @param id Worker identifier
+ * @param fn Function to run in the worker
+ * @param options Creation options eg data to pass to the worker
+ * @returns Worker instance wrapper
+ * @throws If not called from main thread or fn is not a function
+ */
+export function addWorker(
+    id: string,
+    fn: WorkerFunction,
+    options: CreateWorkerOptions = {},
+): ThreadedWorker {
+    if (!isMainThread) throw new Error(
+        'addWorker() can only be called on the main thread')
+    if (typeof fn !== 'function') throw new TypeError(
+        'addWorker(fn, ...) expects a function')
+
+    // We run a tiny worker bootstrapper (this same module file),
+    // and pass the user function as a string for evaluation in the worker.
+    // const bootstrap = path.join(__dirname, 'multithreaded.js')
+    const bootstrap = FileInfo.sibling('multithreaded')
+    const execArgv = getExecArgvForFile(bootstrap)
+    const env = getEnvForFile(bootstrap)
+
+    const worker = new Worker(bootstrap, {
+        execArgv, env,
+        workerData: {
+            __mt_kind: 'inlineFn',
+            id,
+            fnSource: fn.toString(),
+            userData: options.data ?? null,
+        },
+    })
+
+    const instance = createWorkerInstance(id, worker)
+    postAddWorkerSetup(instance)
+
+    return instance
+}
+
+/**
+ * Create a new worker thread running the specified file.
+ * @param id Worker identifier
+ * @param filename Path to worker file
+ * @param options Creation options eg data to pass to the worker
+ * @returns Worker instance wrapper
+ * @throws If not called from main thread or file not found
+ */
+export function addWorkerFile(
+    id: string,
+    filename: string,
+    relativeTo?: string,
+    options: CreateWorkerOptions = {},
+): ThreadedWorker {
+    if (!isMainThread) throw new Error(
+        'addWorkerFile() can only be called on the main thread'
+    )
+
+    const unifiedFilename = unifyFilename(filename, relativeTo)
+    const execArgv = getExecArgvForFile(unifiedFilename)
+    const env = getEnvForFile(unifiedFilename)
+
+    const worker = new Worker(
+        /**
+         * NOTE: We use a small bootstrap file to set up
+         *       the environment (eg ts-node) before
+         *       loading the actual worker file.
+         * 
+         * While technically we could pass the filename
+         * directly to the Worker constructor, this helps
+         * ensure that workers can run TypeScript files
+         * directly when needed - avoiding any gotchas
+         * with module resolution or runtime setup.
+         */
+        path.resolve(FileInfo.dirname, 'worker-bootstrap.js'),
+        {
+            execArgv,
+            env: { ...env, MT_WORKER_ENTRY: unifiedFilename },
+            workerData: {
+                id,
+                userData: options.data ?? null
+            },
+        }
+    )
+
+    const instance = createWorkerInstance(id, worker)
+    postAddWorkerSetup(instance)
+
+    return instance
+}
+
+/** Get a list of all currently active workers. */
+export function getWorkers(): ThreadedWorker[]
+{ return _workers.slice() }
+
+/**
+ * Terminate workers matching the selector.
+ * If no selector is provided, terminates all workers.
+ * 
+ * Use this to forcefully stop workers when they are
+ * no longer needed. For a more graceful shutdown, consider
+ * sending a custom message to the worker and letting it
+ * exit on its own.
+ * 
+ * @param selector Function to select workers to terminate.
+ */
+export function terminateWorkers(
+    selector?: (worker: ThreadedWorker) => boolean
+): void {
+    const toRelease = selector
+        ? _workers.filter(selector)
+        : _workers.slice()
+    for (const worker of toRelease) {
+        worker.instance.terminate()
+        const idx = _workers.indexOf(worker)
+        if (idx >= 0) _workers.splice(idx, 1)
+    }
+}
+
+/**
+ * Detach workers matching the selector from the
+ * internal worker list without terminating them.
+ * If no selector is provided, detaches all workers.
+ * 
+ * Use this to remove workers from management when
+ * you want them to continue running independently
+ * without keeping the main thread alive.
+ * 
+ * @param selector Function to select workers to detach.
+ */
+export function detachWorkers(
+    selector?: (worker: ThreadedWorker) => boolean
+): void {
+    const toDetach = selector
+        ? _workers.filter(selector)
+        : _workers.slice()
+    for (const worker of toDetach) {
+        const idx = _workers.indexOf(worker)
+        if (idx >= 0) _workers.splice(idx, 1)
+    }
+}
+
+/**
+ * Get the worker context when running inside a worker thread.
+ * @returns Worker context
+ * @throws If not called inside a worker thread
+ */
+export function workerContext(): WorkerContext {
+    if (isMainThread) throw new Error(
+        'workerContext() can only be used inside a worker'
+    )
+
+    return createWorkerContext(
+        workerData?.id,
+        workerData?.userData ?? null
+    )
+}
+
+export const Multithreaded = {
+    bindObserver,
+    unbindObserver,
+    bindObserverAll,
+    unbindObserverAll,
+    main,
+    addWorker,
+    addWorkerFile,
+    getWorkers,
+    terminateWorkers,
+    detachWorkers,
+    workerContext,
+} as const
+
+/*********************************************************\
+ * Internal Helper Functions
+\*********************************************************/
+
 function createWorkerHandlers(
     owner: ObserverInstance,
-    worker: IThreadedWorker,
+    worker: ThreadedWorker,
 ): WorkerHandlers {
     return {
         instance: worker,
@@ -319,14 +333,44 @@ function createWorkerHandlers(
     }
 }
 
+function createWorkerInstance(
+    id: string,
+    worker: Worker
+): ThreadedWorker {
+    return {
+        id,
+        instance: worker,
+        post: (msg: any) => worker.postMessage(msg),
+        onMessage: (handler: (value: any) => void) =>
+            worker.on('message', handler),
+        offMessage: (handler: (value: any) => void) =>
+            worker.off('message', handler),
+    }
+}
+
+function createWorkerContext(
+    id: string,
+    userData: any
+): WorkerContext {
+    return {
+        id,
+        userData,
+        post: (msg: any) => parentPort!.postMessage(msg),
+        onMessage: (handler: ((value: any) => void)) =>
+            parentPort!.on('message', handler),
+        offMessage: (handler: ((value: any) => void)) =>
+            parentPort!.off('message', handler),
+    }
+}
+
 function postAddWorkerSetup(
-    worker: IThreadedWorker
+    worker: ThreadedWorker
 ) {
     _workers.push(worker)
     attachLifecycle(worker)
 }
 
-function attachLifecycle(worker: IThreadedWorker) {
+function attachLifecycle(worker: ThreadedWorker) {
     const globalObservers = _observers.filter(o => o.global)
     for (const obs of globalObservers) {
         const alreadyBound = obs.workers.find(w => w.instance === worker)
@@ -362,11 +406,9 @@ function unifyFilename(
             filename
         )
 
-    const thisFile = path.basename(__filename)
     const mainFile = path.basename(filename)
-
-    const thisExt = path.extname(thisFile)
     const mainExt = path.extname(mainFile)
+    const thisExt = FileInfo.ext
 
     if (thisExt !== mainExt) {
         const newName = mainFile.replace(
@@ -497,14 +539,7 @@ function runInlineWorker() {
     }
 
     // Provide a small context object to the function
-    const ctx = {
-        id,
-        userData,
-        post: (msg: any) => parentPort!.postMessage(msg),
-        onMessage: (
-            handler: ((value: any) => void)
-        ) => parentPort!.on('message', handler),
-    }
+    const ctx = createWorkerContext(id, userData)
 
     try { fn(ctx) }
     catch (e) {

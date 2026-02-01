@@ -1,4 +1,4 @@
-import { Multithreaded } from '@/multithreaded'
+import { Multithreaded } from '@tekuconcept/multithreaded'
 
 const ctx = Multithreaded.workerContext()
 

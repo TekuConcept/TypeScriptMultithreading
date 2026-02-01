@@ -1,25 +1,34 @@
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { randomUUID } from 'crypto'
-import { Multithreaded } from '@/multithreaded'
-import { IThreadedWorker, IThreadObserver } from '@/types'
+import { Multithreaded } from '@tekuconcept/multithreaded'
+import type {
+    ThreadedWorker,
+    IThreadObserver,
+} from '@tekuconcept/multithreaded'
+
+// ESM __dirname equivalent
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 class MessageObserver implements IThreadObserver {
-    onWorkerCreated(worker: IThreadedWorker) {
+    onWorkerCreated(worker: ThreadedWorker) {
         console.log(`[main] created worker ${worker.id}`)
     }
 
     onMessage(
         data: any,
-        worker: IThreadedWorker
+        worker: ThreadedWorker
     ) { console.log(`[main] message from ${worker.id}:`, data) }
 
     onError(
         error: Error,
-        worker: IThreadedWorker
+        worker: ThreadedWorker
     ) { console.error(`[main] error from ${worker.id}:`, error) }
 
     onExit(
         code: number,
-        worker: IThreadedWorker
+        worker: ThreadedWorker
     ) { console.log(`[main] exit from ${worker.id}:`, code) }
 }
 
@@ -45,8 +54,8 @@ Multithreaded.main(() => {
     )
 
     // independent messages to each worker instance
-    w1.instance.postMessage({ type: 'ping', n: 1 })
-    w2.instance.postMessage({ type: 'ping', n: 2 })
+    w1.post({ type: 'ping', n: 1 })
+    w2.post({ type: 'ping', n: 2 })
 
     setTimeout(() => Multithreaded.terminateWorkers(), 1500)
 })
