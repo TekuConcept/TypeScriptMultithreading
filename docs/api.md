@@ -31,7 +31,7 @@ Workers receive a `WorkerContext` object that provides:
 
 Run the provided function on the main thread.
 
-While one can create workers and perform other operations outside this function's scope, they may not be guaranteed to run on the main thread or otherwise cause unexpected runtime errors.
+While one can create workers and perform other operations outside this function's scope, they may not be guaranteed to run on the main thread or otherwise may cause unexpected runtime errors.
 
 This function basically uses the `isMainThread` guard under the hood.
 
@@ -63,6 +63,7 @@ const worker = Multithreaded.addWorker(
     'worker-1',
     (ctx) => {
         ctx.post({ type: 'ready' })
+        // do work
     },
     { data: { role: 'example' } }
 )
@@ -225,7 +226,7 @@ interface IThreadObserver {
 #### `CreateWorkerOptions`
 
 Optional configuration for worker creation. Here is were
-user-data may be passed to the worker for setup, initialization, context, etc.
+user-data may be passed for setup, initialization, context, etc.
 
 ```ts
 interface CreateWorkerOptions {
@@ -249,6 +250,6 @@ type WorkerFunction = (ctx: WorkerContext) => void
 * Prefer message-based shutdown over forced termination.
 * Observers are ideal for logging, metrics, or centralized message routing.
 * Inline workers are convenient for small tasks; file-based workers scale better for complex logic.
-* Inline workers are technically invoked as file-based workers as well, but use the multithreaded file as the anchored entrypoint.
+* Inline workers are technically invoked as file-based workers, but uses the `multithreaded` file as the anchor point.
 
 _Suggestions and issue-reporting are welcome!_
