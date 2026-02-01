@@ -47,6 +47,8 @@ Multithreaded.main(() => {
 
 Create a new worker thread that executes an inline function.
 
+**Note**: `fn` must be self-contained. It cannot reference other functions outside its scope. For more complex logic, consider using `addWorkerFile`.
+
 **Parameters**
 
 * `id` — Unique identifier for the worker
@@ -93,6 +95,33 @@ Multithreaded.addWorkerFile(
     './worker.js',
     __dirname
 )
+```
+
+---
+
+#### `asyncValue(fn, options?): AbortablePromise`
+
+Creates a new worker thread internally, which executes an inline function. This may be called from both the main thread and worker threads.
+
+**Note**: `fn` must be self-contained. It cannot reference other functions outside its scope.
+
+**Parameters**
+
+* `fn` — Function executed inside the worker thread
+* `options` — Optional configuration (initial user data)
+
+**Throws**
+
+* If `fn` is not a function
+
+```ts
+Multithreaded.asyncValue<number>(
+    (offset) => return offset + 8,
+    { data: 42 }
+)
+    .timeout(15_000)
+    .then(result => console.log(`Not to ${result}!`))
+    .catch(e => console.error(e))
 ```
 
 ## Worker Management

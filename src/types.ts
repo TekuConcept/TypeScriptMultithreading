@@ -68,6 +68,11 @@ export interface CreateWorkerOptions {
     data?: any
 }
 
+export interface AsyncValueOptions {
+    /** User-defined data to pass to the worker. */
+    data?: any
+}
+
 export interface Handlers {
     message: (data: any) => void
     error: (error: Error) => void
@@ -91,3 +96,8 @@ export interface ObserverInstance {
  *            userData, and messaging methods
  */
 export type WorkerFunction = (ctx: WorkerContext) => void
+
+/**
+ * A function that returns a value of type T.
+ */
+export type ValueFunction<T> = (data?: any) => T

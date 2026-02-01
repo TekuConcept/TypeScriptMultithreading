@@ -1,4 +1,5 @@
 import * as path from 'path'
+import { randomUUID } from 'crypto'
 import {
     Worker,
     isMainThread,
@@ -14,7 +15,10 @@ import {
     WorkerContext,
     WorkerFunction,
     WorkerHandlers,
+    ValueFunction,
+    AsyncValueOptions,
 } from './types.js'
+import { AbortablePromise } from './abortable-promise.js'
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -162,7 +166,6 @@ export function addWorker(
 
     // We run a tiny worker bootstrapper (this same module file),
     // and pass the user function as a string for evaluation in the worker.
-    // const bootstrap = path.join(__dirname, 'multithreaded.js')
     const bootstrap = FileInfo.sibling('multithreaded')
     const execArgv = getExecArgvForFile(bootstrap)
     const env = getEnvForFile(bootstrap)
@@ -232,6 +235,73 @@ export function addWorkerFile(
     postAddWorkerSetup(instance)
 
     return instance
+}
+
+type AsyncValueWorkerData = {
+    __mt_kind: 'asyncValue'
+    userData: any
+    fnSource: string
+}
+
+export function asyncValue<T = any>(
+    fn: ValueFunction<T>,
+    options: AsyncValueOptions = {},
+): AbortablePromise<T> {
+    if (typeof fn !== 'function') throw new TypeError(
+        'asyncValue(fn, ...) expects a function')
+
+    const data: AsyncValueWorkerData = {
+        __mt_kind: 'asyncValue',
+        userData: options.data ?? null,
+        fnSource: fn.toString(),
+    }
+
+    return new AbortablePromise<T>((resolve, reject, signal) => {
+        const worker = addWorker(
+            `asyncValue-${randomUUID}`,
+            runAsyncValueWorker,
+            { data },
+        )
+
+        const cleanup = () => {
+            worker.instance.removeAllListeners()
+            worker.instance.terminate()
+            removeWorker(worker)
+        }
+
+        // Listen for abort signal to terminate worker
+        signal.addEventListener('abort', () => {
+            reject(new Error('Operation aborted'))
+            cleanup()
+        })
+
+        worker.instance.on('message', (msg: any) => {
+            if (msg.type === 'mt:result') {
+                resolve(msg.result)
+                cleanup()
+            } else if (msg.type === 'mt:error') {
+                reject(new Error(msg.error))
+                cleanup()
+            }
+        })
+
+        worker.instance.on('error', (error: Error) => {
+            reject(error)
+            cleanup()
+        })
+
+        worker.instance.on('exit', (code: number) => {
+            if (code !== 0)
+                reject(new Error(`Worker exited with code ${code}`))
+            else {
+                // NOTE: The promise listener may have
+                // already resolved/rejected here, so
+                // we only reject if still pending.
+                reject(new Error('Worker exited before returning a result'))
+            }
+            cleanup()
+        })
+    })
 }
 
 /** Get a list of all currently active workers. */
@@ -309,6 +379,7 @@ export const Multithreaded = {
     main,
     addWorker,
     addWorkerFile,
+    asyncValue,
     getWorkers,
     terminateWorkers,
     detachWorkers,
@@ -379,6 +450,19 @@ function attachLifecycle(worker: ThreadedWorker) {
 
         if (obs.instance.onWorkerCreated)
             obs.instance.onWorkerCreated(worker)
+    }
+}
+
+function removeWorker(worker: ThreadedWorker) {
+    const idx = _workers.indexOf(worker)
+    if (idx >= 0) _workers.splice(idx, 1)
+
+    // Unbind from all observers
+    for (const obs of _observers) {
+        const existingWorker = obs.workers.find(
+            w => w.instance === worker)
+        if (existingWorker)
+            unbindObserver(obs.instance, worker)
     }
 }
 
@@ -513,6 +597,46 @@ function getEnvForFile(filename: string): NodeJS.ProcessEnv {
 /*********************************************************\
  * Multithreaded Worker Abstraction
 \*********************************************************/
+
+/** Worker function to run asyncValue tasks. */
+function runAsyncValueWorker<T>(ctx: WorkerContext) {
+    // Execute the function and post the result
+    // -- ASYNC VALUE WORKER --
+    const wd = ctx.userData as AsyncValueWorkerData
+
+    if (!wd || wd.__mt_kind !== 'asyncValue') {
+        ctx.post({
+            type: 'mt:error',
+            error: 'Invalid asyncValue worker setup - missing worker data'
+        })
+        return
+    }
+
+    let userFn: (arg: any) => any
+    try {
+        // Rehydrate function from source string
+        userFn = (0, eval)(`(${wd.fnSource})`)
+    } catch (e) {
+        ctx.post({
+            type: 'mt:error',
+            error: `Failed to eval fn: ${String(e)}`
+        })
+        return
+    }
+
+    let result: T
+    try {
+        result = userFn(wd.userData)
+        Promise.resolve(result)
+            .then((value) => ctx.post({ type: 'mt:result', result: value }))
+            .catch((e) => ctx.post({ type: 'mt:error', error: String(e) }))
+    } catch (e) {
+        ctx.post({ type: 'mt:error', error: String(e) })
+        return
+    }
+    ctx.post({ type: 'mt:result', result })
+    // -- END ASYNC VALUE WORKER --
+}
 
 /**
  * Internal worker bootstrap:
