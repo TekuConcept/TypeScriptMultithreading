@@ -182,6 +182,18 @@ export function addWorker(
     return addWorkerHelper(id, data)
 }
 
+export function addWorkerFile(
+  id: string,
+  filename: string,
+  options?: CreateWorkerOptions
+): ThreadedWorker
+export function addWorkerFile(
+  id: string,
+  filename: string,
+  relativeTo?: string,
+  options?: CreateWorkerOptions
+): ThreadedWorker
+
 /**
  * Create a new worker thread running the specified file.
  * @param id Worker identifier
@@ -193,12 +205,28 @@ export function addWorker(
 export function addWorkerFile(
     id: string,
     filename: string,
-    relativeTo?: string,
-    options: CreateWorkerOptions = {},
+    relOrOpts?: string | CreateWorkerOptions,
+    opts?: CreateWorkerOptions,
 ): ThreadedWorker {
     if (!isMainThread) throw new Error(
         'addWorkerFile() can only be called on the main thread'
     )
+
+    let relativeTo: string | undefined
+    let options: CreateWorkerOptions | undefined
+
+    if (relOrOpts === null ||
+        relOrOpts === undefined ||
+        typeof relOrOpts === 'string'
+    ) {
+        // Signature: (id, filename, relativeTo?, options?)
+        relativeTo = relOrOpts as string | undefined
+        options = (opts ?? {}) as CreateWorkerOptions
+    } else {
+        // Signature: (id, filename, options?)
+        relativeTo = undefined
+        options = (relOrOpts ?? {}) as CreateWorkerOptions
+    }
 
     const data = {
         __mt_kind: 'workerFile',
@@ -245,9 +273,35 @@ export function asyncValue<T = any>(
 
 export function asyncValueFile<T = any>(
     filename: string,
+    opts?: AsyncValueOptions,
+): AbortablePromise<T>
+export function asyncValueFile<T = any>(
+    filename: string,
     relativeTo?: string,
-    options: AsyncValueOptions = {},
+    opts?: AsyncValueOptions,
+): AbortablePromise<T>
+
+export function asyncValueFile<T = any>(
+    filename: string,
+    relOrOpts?: string | AsyncValueOptions,
+    opts?: AsyncValueOptions,
 ): AbortablePromise<T> {
+    let relativeTo: string | undefined
+    let options: AsyncValueOptions | undefined
+
+    if (relOrOpts === null ||
+        relOrOpts === undefined ||
+        typeof relOrOpts === 'string'
+    ) {
+        // Signature: (id, filename, relativeTo?, options?)
+        relativeTo = relOrOpts as string | undefined
+        options = (opts ?? {}) as AsyncValueOptions
+    } else {
+        // Signature: (id, filename, options?)
+        relativeTo = undefined
+        options = (relOrOpts ?? {}) as AsyncValueOptions
+    }
+
     const id = `asyncValueFile-${randomUUID()}`
     const data = {
         __mt_kind: 'asyncValueFile',

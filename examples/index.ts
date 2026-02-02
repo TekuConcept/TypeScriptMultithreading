@@ -70,7 +70,6 @@ Multithreaded.main(async () => {
 
     const r2 = await Multithreaded.asyncValueFile<number>(
         path.resolve(__dirname, 'value-worker.ts'),
-        undefined,
         { data: { offset: 50 } },
     )
 
