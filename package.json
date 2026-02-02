@@ -1,6 +1,6 @@
 {
   "name": "@tekuconcept/multithreaded",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Simple multithreaded tasks in NodeJS using TypeScript",
   "type": "module",
   "main": "./dist/cjs/index.js",

@@ -2,6 +2,10 @@
  * File information utilities for CommonJS modules.
  * Provides filename, dirname, extension, and
  * a method to get sibling file paths.
+ * 
+ * IMPORTANT: This file must exist at the same path
+ * as the code-file that imports it, so that the
+ * relative paths resolve correctly in both CJS and ESM builds.
  */
 
 import * as path from 'path'

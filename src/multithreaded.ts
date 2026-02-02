@@ -1,6 +1,9 @@
 import * as path from 'path'
+import { randomUUID } from 'crypto'
 import {
+    Transferable,
     Worker,
+    WorkerOptions,
     isMainThread,
     parentPort,
     workerData,
@@ -14,7 +17,16 @@ import {
     WorkerContext,
     WorkerFunction,
     WorkerHandlers,
+    ValueFunction,
+    AsyncValueOptions,
+    MTMessageType,
 } from './types.js'
+import { AbortablePromise } from './abortable-promise.js'
+import {
+    AsyncValueWorkerFileData,
+    InlineWorkerData,
+    WorkerFileData,
+} from './bootstrap-types.js'
 
 const isDev = process.env.NODE_ENV === 'development'
 
@@ -157,31 +169,31 @@ export function addWorker(
 ): ThreadedWorker {
     if (!isMainThread) throw new Error(
         'addWorker() can only be called on the main thread')
+
     if (typeof fn !== 'function') throw new TypeError(
         'addWorker(fn, ...) expects a function')
 
-    // We run a tiny worker bootstrapper (this same module file),
-    // and pass the user function as a string for evaluation in the worker.
-    // const bootstrap = path.join(__dirname, 'multithreaded.js')
-    const bootstrap = FileInfo.sibling('multithreaded')
-    const execArgv = getExecArgvForFile(bootstrap)
-    const env = getEnvForFile(bootstrap)
+    const data = {
+        __mt_kind: 'inlineFn',
+        id,
+        entry: fn.toString(),
+        userData: options.data ?? null,
+    } as InlineWorkerData
 
-    const worker = new Worker(bootstrap, {
-        execArgv, env,
-        workerData: {
-            __mt_kind: 'inlineFn',
-            id,
-            fnSource: fn.toString(),
-            userData: options.data ?? null,
-        },
-    })
-
-    const instance = createWorkerInstance(id, worker)
-    postAddWorkerSetup(instance)
-
-    return instance
+    return addWorkerHelper(id, data, options.transfer)
 }
+
+export function addWorkerFile(
+  id: string,
+  filename: string,
+  options?: CreateWorkerOptions
+): ThreadedWorker
+export function addWorkerFile(
+  id: string,
+  filename: string,
+  relativeTo?: string,
+  options?: CreateWorkerOptions
+): ThreadedWorker
 
 /**
  * Create a new worker thread running the specified file.
@@ -194,44 +206,130 @@ export function addWorker(
 export function addWorkerFile(
     id: string,
     filename: string,
-    relativeTo?: string,
-    options: CreateWorkerOptions = {},
+    relOrOpts?: string | CreateWorkerOptions,
+    opts?: CreateWorkerOptions,
 ): ThreadedWorker {
     if (!isMainThread) throw new Error(
         'addWorkerFile() can only be called on the main thread'
     )
 
-    const unifiedFilename = unifyFilename(filename, relativeTo)
-    const execArgv = getExecArgvForFile(unifiedFilename)
-    const env = getEnvForFile(unifiedFilename)
+    let relativeTo: string | undefined
+    let options: CreateWorkerOptions | undefined
 
-    const worker = new Worker(
-        /**
-         * NOTE: We use a small bootstrap file to set up
-         *       the environment (eg ts-node) before
-         *       loading the actual worker file.
-         * 
-         * While technically we could pass the filename
-         * directly to the Worker constructor, this helps
-         * ensure that workers can run TypeScript files
-         * directly when needed - avoiding any gotchas
-         * with module resolution or runtime setup.
-         */
-        path.resolve(FileInfo.dirname, 'worker-bootstrap.js'),
-        {
-            execArgv,
-            env: { ...env, MT_WORKER_ENTRY: unifiedFilename },
-            workerData: {
-                id,
-                userData: options.data ?? null
-            },
-        }
+    if (relOrOpts === null ||
+        relOrOpts === undefined ||
+        typeof relOrOpts === 'string'
+    ) {
+        // Signature: (id, filename, relativeTo?, options?)
+        relativeTo = relOrOpts as string | undefined
+        options = (opts ?? {}) as CreateWorkerOptions
+    } else {
+        // Signature: (id, filename, options?)
+        relativeTo = undefined
+        options = (relOrOpts ?? {}) as CreateWorkerOptions
+    }
+
+    const data = {
+        __mt_kind: 'workerFile',
+        id,
+        userData: options.data ?? null
+    } as WorkerFileData
+
+    return addFileWorkerHelper(
+        id,
+        data,
+        filename,
+        relativeTo,
+        options.transfer,
     )
+}
 
-    const instance = createWorkerInstance(id, worker)
-    postAddWorkerSetup(instance)
+export function asyncValue<T = any>(
+    fn: ValueFunction<T>,
+    options: AsyncValueOptions = {},
+): AbortablePromise<T> {
+    if (typeof fn !== 'function') throw new TypeError(
+        'asyncValue(fn, ...) expects a function')
 
-    return instance
+    const id = `asyncValue-${randomUUID()}`
+    const data = {
+        __mt_kind: 'asyncValue',
+        id,
+        entry: fn.toString(),
+        userData: options.data ?? null,
+    } as InlineWorkerData
+
+    return new AbortablePromise<T>((resolve, reject, signal) => {
+        const worker = addWorkerHelper(id, data, options.transfer)
+
+        const cleanup = attachAsyncValueLifecycle(
+            worker, resolve, reject)
+
+        // Listen for abort signal to terminate worker
+        signal.addEventListener('abort', () => {
+            reject(new Error('Operation aborted'))
+            cleanup()
+        })
+    })
+}
+
+export function asyncValueFile<T = any>(
+    filename: string,
+    opts?: AsyncValueOptions,
+): AbortablePromise<T>
+export function asyncValueFile<T = any>(
+    filename: string,
+    relativeTo?: string,
+    opts?: AsyncValueOptions,
+): AbortablePromise<T>
+
+export function asyncValueFile<T = any>(
+    filename: string,
+    relOrOpts?: string | AsyncValueOptions,
+    opts?: AsyncValueOptions,
+): AbortablePromise<T> {
+    let relativeTo: string | undefined
+    let options: AsyncValueOptions | undefined
+
+    if (relOrOpts === null ||
+        relOrOpts === undefined ||
+        typeof relOrOpts === 'string'
+    ) {
+        // Signature: (id, filename, relativeTo?, options?)
+        relativeTo = relOrOpts as string | undefined
+        options = (opts ?? {}) as AsyncValueOptions
+    } else {
+        // Signature: (id, filename, options?)
+        relativeTo = undefined
+        options = (relOrOpts ?? {}) as AsyncValueOptions
+    }
+
+    const id = `asyncValueFile-${randomUUID()}`
+    const data = {
+        __mt_kind: 'asyncValueFile',
+        id,
+        userData: options.data ?? null,
+        exportName: options.exportName || 'default',
+    } as AsyncValueWorkerFileData
+
+    return new AbortablePromise<T>((resolve, reject, signal) => {
+        const worker = addFileWorkerHelper(
+            id,
+            data,
+            filename,
+            relativeTo,
+            options.transfer,
+        )
+
+        const cleanup = attachAsyncValueLifecycle(
+            worker, resolve, reject)
+
+        // Listen for abort signal to terminate worker
+        signal.addEventListener('abort', () => {
+            reject(new Error('Operation aborted'))
+            cleanup()
+        })
+    })
 }
 
 /** Get a list of all currently active workers. */
@@ -263,6 +361,14 @@ export function terminateWorkers(
 }
 
 /**
+ * Terminate a specific worker.
+ * @param worker The worker to terminate.
+ */
+export function terminate(
+    worker: ThreadedWorker
+): void { terminateWorkers(w => w === worker) }
+
+/**
  * Detach workers matching the selector from the
  * internal worker list without terminating them.
  * If no selector is provided, detaches all workers.
@@ -282,8 +388,18 @@ export function detachWorkers(
     for (const worker of toDetach) {
         const idx = _workers.indexOf(worker)
         if (idx >= 0) _workers.splice(idx, 1)
+        worker.instance.unref()
     }
 }
+
+/**
+ * Detach a specific worker from the internal worker list
+ * without terminating it.
+ * @param worker The worker to detach.
+ */
+export function detach(
+    worker: ThreadedWorker
+): void { detachWorkers(w => w === worker) }
 
 /**
  * Get the worker context when running inside a worker thread.
@@ -309,6 +425,8 @@ export const Multithreaded = {
     main,
     addWorker,
     addWorkerFile,
+    asyncValue,
+    asyncValueFile,
     getWorkers,
     terminateWorkers,
     detachWorkers,
@@ -318,6 +436,67 @@ export const Multithreaded = {
 /*********************************************************\
  * Internal Helper Functions
 \*********************************************************/
+
+function addWorkerHelper(
+    id: string,
+    workerData: InlineWorkerData,
+    transferList?: Transferable[],
+): ThreadedWorker {
+    // We run a tiny worker bootstrapper (this same module file),
+    // and pass the user function as a string for evaluation in the worker.
+    const bootstrap = FileInfo.sibling('multithreaded')
+    const execArgv = getExecArgvForFile(bootstrap)
+    const env = getEnvForFile(bootstrap)
+
+    const worker = new Worker(
+        path.resolve(FileInfo.dirname, 'worker-bootstrap.js'),
+        {
+            execArgv,
+            env,
+            workerData,
+            transferList,
+        }
+    )
+
+    const instance = createWorkerInstance(id, worker)
+    postAddWorkerSetup(instance)
+
+    return instance
+}
+
+function addFileWorkerHelper(
+    id: string,
+    workerData: WorkerFileData | AsyncValueWorkerFileData,
+    filename: string,
+    relativeTo?: string,
+    transferList?: Transferable[],
+): ThreadedWorker {
+    const unifiedFilename = unifyFilename(filename, relativeTo)
+    const execArgv = getExecArgvForFile(unifiedFilename)
+    const env = getEnvForFile(unifiedFilename)
+
+    const workerOptions: WorkerOptions = {
+        execArgv,
+        env: { ...env, MT_WORKER_ENTRY: unifiedFilename },
+        workerData,
+        transferList,
+    }
+
+    const worker = new Worker(
+        /**
+         * NOTE: We use a small bootstrap file to set up
+         *       the environment (eg ts-node) before
+         *       loading the actual worker file.
+         */
+        path.resolve(FileInfo.dirname, 'worker-bootstrap.js'),
+        workerOptions,
+    )
+
+    const instance = createWorkerInstance(id, worker)
+    postAddWorkerSetup(instance)
+
+    return instance
+}
 
 function createWorkerHandlers(
     owner: ObserverInstance,
@@ -340,7 +519,10 @@ function createWorkerInstance(
     return {
         id,
         instance: worker,
-        post: (msg: any) => worker.postMessage(msg),
+        post: (
+            msg: any,
+            transferList?: readonly Transferable[],
+        ) => worker.postMessage(msg, transferList),
         onMessage: (handler: (value: any) => void) =>
             worker.on('message', handler),
         offMessage: (handler: (value: any) => void) =>
@@ -355,11 +537,16 @@ function createWorkerContext(
     return {
         id,
         userData,
-        post: (msg: any) => parentPort!.postMessage(msg),
+        post: (
+            msg: any,
+            transferList?: readonly Transferable[],
+        ) => parentPort!.postMessage(msg, transferList),
         onMessage: (handler: ((value: any) => void)) =>
             parentPort!.on('message', handler),
         offMessage: (handler: ((value: any) => void)) =>
             parentPort!.off('message', handler),
+        keepalive: () => parentPort!.ref(),
+        finish: () => parentPort!.unref(),
     }
 }
 
@@ -379,6 +566,64 @@ function attachLifecycle(worker: ThreadedWorker) {
 
         if (obs.instance.onWorkerCreated)
             obs.instance.onWorkerCreated(worker)
+    }
+
+    worker.instance.on('exit', () => removeWorker(worker))
+}
+
+function attachAsyncValueLifecycle(
+    worker: ThreadedWorker,
+    resolve: (value: any) => void,
+    reject: (reason?: any) => void,
+) {
+    const cleanup = () => {
+        worker.instance.removeAllListeners()
+        worker.instance.terminate()
+        removeWorker(worker)
+    }
+
+    worker.instance.on('message', (msg: any) => {
+        if (msg.type === MTMessageType.Result) {
+            resolve(msg.result)
+            // resolve before ack to avoid premature exit-rejection
+            worker.post({ __mt_type: MTMessageType.Ack })
+            cleanup()
+        } else if (msg.type === MTMessageType.Error) {
+            reject(new Error(msg.error))
+            cleanup()
+        }
+    })
+
+    worker.instance.on('error', (error: Error) => {
+        reject(error)
+        cleanup()
+    })
+
+    worker.instance.on('exit', (code: number) => {
+        if (code !== 0)
+            reject(new Error(`Worker exited with code ${code}`))
+        else {
+            // NOTE: The promise listener may have
+            // already resolved/rejected here, so
+            // we only reject if still pending.
+            reject(new Error('Worker exited before returning a result'))
+        }
+        cleanup()
+    })
+
+    return cleanup
+}
+
+function removeWorker(worker: ThreadedWorker) {
+    const idx = _workers.indexOf(worker)
+    if (idx >= 0) _workers.splice(idx, 1)
+
+    // Unbind from all observers
+    for (const obs of _observers) {
+        const existingWorker = obs.workers.find(
+            w => w.instance === worker)
+        if (existingWorker)
+            unbindObserver(obs.instance, worker)
     }
 }
 
@@ -509,47 +754,3 @@ function getEnvForFile(filename: string): NodeJS.ProcessEnv {
         TS_NODE_PROJECT: path.resolve(process.cwd(), 'tsconfig.json'),
     }
 }
-
-/*********************************************************\
- * Multithreaded Worker Abstraction
-\*********************************************************/
-
-/**
- * Internal worker bootstrap:
- * If this file is started as a worker with __mt_kind=inlineFn,
- * it evaluates and executes the provided function.
- */
-function runInlineWorker() {
-    if (!workerData || workerData.__mt_kind !== 'inlineFn') return
-
-    if (!parentPort) throw new Error('Missing parentPort in worker')
-    const { id, fnSource, userData } = workerData
-
-    let fn: (ctx: WorkerContext) => void
-    try {
-        // Wrap in parens so 'function () {}' parses as an expression
-        fn = (0, eval)(`(${fnSource})`)
-    } catch (e) {
-        parentPort.postMessage({
-            type: 'mt:error',
-            stage: 'eval',
-            id, error: String(e)
-        })
-        throw e
-    }
-
-    // Provide a small context object to the function
-    const ctx = createWorkerContext(id, userData)
-
-    try { fn(ctx) }
-    catch (e) {
-        parentPort.postMessage({
-            type: 'mt:error',
-            stage: 'run',
-            id, error: String(e)
-        })
-        throw e
-    }
-}
-
-if (!isMainThread) runInlineWorker()

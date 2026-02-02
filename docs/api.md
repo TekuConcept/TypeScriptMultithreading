@@ -47,6 +47,8 @@ Multithreaded.main(() => {
 
 Create a new worker thread that executes an inline function.
 
+**Note**: `fn` must be self-contained. It cannot reference other functions outside its scope. For more complex logic, consider using `addWorkerFile`.
+
 **Parameters**
 
 * `id` — Unique identifier for the worker
@@ -95,6 +97,60 @@ Multithreaded.addWorkerFile(
 )
 ```
 
+---
+
+#### `asyncValue(fn, options?): AbortablePromise`
+
+Creates a new worker thread internally, which executes an inline function and returns its corresponding value. This may be called from both the main thread and worker threads.
+
+**Note**: `fn` must be self-contained. It cannot reference other functions outside its scope.
+
+**Parameters**
+
+* `fn` — Function executed inside the worker thread
+* `options` — Optional configuration (initial user data)
+
+**Throws**
+
+* If `fn` is not a function
+
+```ts
+Multithreaded.asyncValue<number>(
+    (offset) => return offset + 8,
+    { data: 42 }
+)
+    .timeout(15_000)
+    .then(result => console.log(`Not to ${result}!`))
+    .catch(e => console.error(e))
+```
+
+---
+
+#### `asyncValueFile(filename, relativeTo?, options?): AbortablePromise`
+
+Creates a new worker thread internally, which executes a file's target export function and returns its corresponding value. This may be called from both the main thread and worker threads.
+
+**Parameters**
+
+* `filename` — Path to the worker entry file
+* `relativeTo` - Optional base directory for resolving the file
+* `options` — Optional configuration (initial user data, target)
+
+**Throws**
+
+* If the file cannot be resolved
+
+```ts
+Multithreaded.asyncValueFile<number>(
+    (offset) => return offset + 8,
+    undefined,
+    { data: 42 }
+)
+    .timeout(15_000)
+    .then(result => console.log(`Not to ${result}!`))
+    .catch(e => console.error(e))
+```
+
 ## Worker Management
 
 #### `getWorkers(): ThreadedWorker[]`
@@ -117,6 +173,20 @@ Multithreaded.terminateWorkers(w => w.id === 'worker-1')
 
 ---
 
+#### `terminate(worker): void`
+
+Forcefully terminate the provided worker.
+
+Use this for immediate shutdown. For graceful shutdowns, send a custom message and allow the worker to exit voluntarily.
+
+**WARNING:** Prefer this over `w.instance.terminate()` to avoid putting Multithreaded in a bad state.
+
+```ts
+Multithreaded.terminate(w)
+```
+
+---
+
 #### `detachWorkers(selector?): void`
 
 Detach workers from internal management without terminating them.
@@ -125,6 +195,20 @@ Detached workers continue running independently and will no longer keep the main
 
 ```ts
 Multithreaded.detachWorkers()
+```
+
+---
+
+#### `detach(worker): void`
+
+Detach the provided worker from internal management without terminating it.
+
+The detached worker continues running independently and will no longer keep the main thread alive.
+
+**WARNING:** Prefer this over `w.instance.unref()` to avoid putting Multithreaded in a bad state.
+
+```ts
+Multithreaded.detach()
 ```
 
 
@@ -181,7 +265,10 @@ interface ThreadedWorker {
     id: string
     instance: Worker
 
-    post(msg: any): void
+    post(
+        msg: any,
+        transferList: readonly Transferable[]
+    ): void
     onMessage(handler: (value: any) => void): void
     offMessage(handler: (value: any) => void): void
 }
@@ -193,16 +280,22 @@ interface ThreadedWorker {
 
 Provided to worker functions to enable messaging and access user data.
 
-**Note:** memory for user data is not shared between threads. Any changes to user data within a worker thread will not be reflected on the main thread.
+**Note:** memory for user data is generally not shared between threads. Any changes to user data within a worker thread will not be reflected on the main thread. `SharedArrayBuffer` is the exception to this limitation.
 
 ```ts
 interface WorkerContext {
     id: string
     userData: any
 
-    post(msg: any): void
+    post(
+        msg: any,
+        transferList: readonly Transferable[]
+    ): void
     onMessage(handler: (value: any) => void): void
     offMessage(handler: (value: any) => void): void
+
+    keepalive(): void
+    finish(): void
 }
 ```
 
@@ -231,6 +324,22 @@ user-data may be passed for setup, initialization, context, etc.
 ```ts
 interface CreateWorkerOptions {
     data?: any
+    transfer?: Transferable[]
+}
+```
+
+---
+
+#### `AsyncValueOptions`
+
+Optional configuration for async-value processing. Here is were
+user-data may be passed for setup, initialization, context, etc.
+
+```ts
+interface AsyncValueOptions {
+    data?: any
+    transfer?: Transferable[]
+    exportName?: string
 }
 ```
 
@@ -242,6 +351,16 @@ Function shape executed inside a worker thread.
 
 ```ts
 type WorkerFunction = (ctx: WorkerContext) => void
+```
+
+---
+
+#### `ValueFunction`
+
+Function shape executed inside the asyncValue.
+
+```ts
+type ValueFunction<T> = (data?: any) => T | Promise<T>
 ```
 
 

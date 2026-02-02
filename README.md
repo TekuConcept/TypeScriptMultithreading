@@ -27,7 +27,35 @@ $ npm install @tekuconcept/multithreaded
 
 ## Exmples
 
-Below is a minimal example that spawns a worker, exchanges messages, and finally shuts everything down.
+
+### Async Value Functions
+
+For basic multi-threading, consider using `asyncValue`. (Works on all threads)
+
+```ts
+const value = await Multithreaded.asyncValue<number>(
+    // Calculate the fibonacci value at `n`
+    (n: number) => {
+        if (n <= 1) return n
+
+        let prev = 0
+        let curr = 1
+
+        for (let i = 2; i <= n; i++) {
+            const next = prev + curr
+            prev = curr
+            curr = next
+        }
+
+        return curr
+    },
+    { data: 10 }
+).timeout(15_000) // optionally timeout the request
+```
+
+### Dual Operating Threads
+
+A slightly more involved example that spawns a worker, exchanges messages, and finally shuts everything down.
 
 ```ts
 function createWorker() {
@@ -51,12 +79,13 @@ function createWorker() {
     return Multithreaded.addWorker(randomUUID(), scope)
 }
 
-Multithreaded.main(() => {
-    // Listens for responses from all workers
-    // Use bindObserver(o, w) for a single worker
-    Multithreaded.bindObserverAll(/* your observer */)
+// --------------------------------------------------------
 
+Multithreaded.main(() => {
     const w1 = createWorker()
+
+    // Log all that our worker sends to us
+    w1.onMessage((message) => console.log(message))
 
     // Let's send a job to our worker...
     w1.post({ type: 'ping', n: 1 })
@@ -67,4 +96,4 @@ Multithreaded.main(() => {
 })
 ```
 
-See the [API doc](./docs/api.md) for a brief overview of functions and types.
+See the [API doc](./docs/api.md) for a brief overview of functions and types. For more examples and recipes, have a look through the [example docs](./docs/examples/index.md).
