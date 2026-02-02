@@ -1,12 +1,17 @@
-import { Worker } from 'worker_threads'
+import { Transferable, Worker } from 'worker_threads'
 
 export interface ThreadedWorker {
     /** The unique identifier of this worker. */
     id: string
     /** The underlying Worker instance. */
     instance: Worker
-    /** Send a message to the worker. */
-    post: (msg: any) => void
+    /**
+     * Send a message to the worker.
+     * @param msg The message to send
+     * @param transferList Optional list of Transferable objects to
+     *                     transfer to the worker rather than copy.
+     */
+    post: (msg: any, transferList?: readonly Transferable[]) => void
     /**
      * Register a message handler for messages from the worker.
      * See also `IThreadObserver.onMessage()`.
@@ -52,8 +57,13 @@ export interface WorkerContext {
     id: string
     /** User-defined data passed when creating the worker. */
     userData: any
-    /** Send a message to the main thread. */
-    post: (msg: any) => void
+    /**
+     * Send a message to the main thread.
+     * @param msg The message to send
+     * @param transferList Optional list of Transferable objects to
+     *                     transfer to the main thread rather than copy.
+     */
+    post: (msg: any, transferList?: readonly Transferable[]) => void
     /** Register a message handler for messages from the main thread. */
     onMessage: (handler: (value: any) => void) => void
     /** Unregister a message handler. */
@@ -66,11 +76,21 @@ export interface CreateWorkerOptions {
      * via the WorkerContext.userData property.
      */
     data?: any
+    /**
+     * Transferable objects to transfer to the worker.
+     * NOTE: The sender loses access to these objects.
+     */
+    transfer?: Transferable[]
 }
 
 export interface AsyncValueOptions {
     /** User-defined data to pass to the worker. */
     data?: any
+    /**
+     * Transferable objects to transfer to the worker.
+     * NOTE: The sender loses access to these objects.
+     */
+    transfer?: Transferable[]
     /**
      * The name of the export to invoke.
      * Defaults to "default".

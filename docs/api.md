@@ -237,7 +237,10 @@ interface ThreadedWorker {
     id: string
     instance: Worker
 
-    post(msg: any): void
+    post(
+        msg: any,
+        transferList: readonly Transferable[]
+    ): void
     onMessage(handler: (value: any) => void): void
     offMessage(handler: (value: any) => void): void
 }
@@ -256,7 +259,10 @@ interface WorkerContext {
     id: string
     userData: any
 
-    post(msg: any): void
+    post(
+        msg: any,
+        transferList: readonly Transferable[]
+    ): void
     onMessage(handler: (value: any) => void): void
     offMessage(handler: (value: any) => void): void
 }
@@ -287,6 +293,22 @@ user-data may be passed for setup, initialization, context, etc.
 ```ts
 interface CreateWorkerOptions {
     data?: any
+    transfer?: Transferable[]
+}
+```
+
+---
+
+#### `AsyncValueOptions`
+
+Optional configuration for async-value processing. Here is were
+user-data may be passed for setup, initialization, context, etc.
+
+```ts
+interface AsyncValueOptions {
+    data?: any
+    transfer?: Transferable[]
+    exportName?: string
 }
 ```
 
@@ -298,6 +320,16 @@ Function shape executed inside a worker thread.
 
 ```ts
 type WorkerFunction = (ctx: WorkerContext) => void
+```
+
+---
+
+#### `ValueFunction`
+
+Function shape executed inside the asyncValue.
+
+```ts
+type ValueFunction<T> = (data?: any) => T | Promise<T>
 ```
 
 

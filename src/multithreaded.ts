@@ -1,6 +1,7 @@
 import * as path from 'path'
 import { randomUUID } from 'crypto'
 import {
+    Transferable,
     Worker,
     WorkerOptions,
     isMainThread,
@@ -179,7 +180,7 @@ export function addWorker(
         userData: options.data ?? null,
     } as InlineWorkerData
 
-    return addWorkerHelper(id, data)
+    return addWorkerHelper(id, data, options.transfer)
 }
 
 export function addWorkerFile(
@@ -239,6 +240,7 @@ export function addWorkerFile(
         data,
         filename,
         relativeTo,
+        options.transfer,
     )
 }
 
@@ -258,7 +260,7 @@ export function asyncValue<T = any>(
     } as InlineWorkerData
 
     return new AbortablePromise<T>((resolve, reject, signal) => {
-        const worker = addWorkerHelper(id, data)
+        const worker = addWorkerHelper(id, data, options.transfer)
 
         const cleanup = attachAsyncValueLifecycle(
             worker, resolve, reject)
@@ -316,6 +318,7 @@ export function asyncValueFile<T = any>(
             data,
             filename,
             relativeTo,
+            options.transfer,
         )
 
         const cleanup = attachAsyncValueLifecycle(
@@ -419,6 +422,7 @@ export const Multithreaded = {
 function addWorkerHelper(
     id: string,
     workerData: InlineWorkerData,
+    transferList?: Transferable[],
 ): ThreadedWorker {
     // We run a tiny worker bootstrapper (this same module file),
     // and pass the user function as a string for evaluation in the worker.
@@ -428,7 +432,12 @@ function addWorkerHelper(
 
     const worker = new Worker(
         path.resolve(FileInfo.dirname, 'worker-bootstrap.js'),
-        { execArgv, env, workerData }
+        {
+            execArgv,
+            env,
+            workerData,
+            transferList,
+        }
     )
 
     const instance = createWorkerInstance(id, worker)
@@ -442,6 +451,7 @@ function addFileWorkerHelper(
     workerData: WorkerFileData | AsyncValueWorkerFileData,
     filename: string,
     relativeTo?: string,
+    transferList?: Transferable[],
 ): ThreadedWorker {
     const unifiedFilename = unifyFilename(filename, relativeTo)
     const execArgv = getExecArgvForFile(unifiedFilename)
@@ -451,6 +461,7 @@ function addFileWorkerHelper(
         execArgv,
         env: { ...env, MT_WORKER_ENTRY: unifiedFilename },
         workerData,
+        transferList,
     }
 
     const worker = new Worker(
@@ -490,7 +501,10 @@ function createWorkerInstance(
     return {
         id,
         instance: worker,
-        post: (msg: any) => worker.postMessage(msg),
+        post: (
+            msg: any,
+            transferList?: readonly Transferable[],
+        ) => worker.postMessage(msg, transferList),
         onMessage: (handler: (value: any) => void) =>
             worker.on('message', handler),
         offMessage: (handler: (value: any) => void) =>
@@ -505,7 +519,10 @@ function createWorkerContext(
     return {
         id,
         userData,
-        post: (msg: any) => parentPort!.postMessage(msg),
+        post: (
+            msg: any,
+            transferList?: readonly Transferable[],
+        ) => parentPort!.postMessage(msg, transferList),
         onMessage: (handler: ((value: any) => void)) =>
             parentPort!.on('message', handler),
         offMessage: (handler: ((value: any) => void)) =>
