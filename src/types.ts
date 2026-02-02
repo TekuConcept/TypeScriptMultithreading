@@ -68,6 +68,24 @@ export interface WorkerContext {
     onMessage: (handler: (value: any) => void) => void
     /** Unregister a message handler. */
     offMessage: (handler: (value: any) => void) => void
+    /**
+     * Keep the worker alive when there are no more tasks.
+     * Call this method to prevent the worker from exiting.
+     * 
+     * If listeners are attached or removed using `.onMessage()`,
+     * the thread is kept alive or permitted to finish automatically
+     * depending on whether listeners for the event exist.
+     */
+    keepalive: () => void
+    /**
+     * Allow the worker to exit when there are no more tasks.
+     * Call this method to let the worker finish.
+     * 
+     * If listeners are attached or removed using `.onMessage()`,
+     * the thread is kept alive or permitted to finish automatically
+     * depending on whether listeners for the event exist.
+     */
+    finish: () => void
 }
 
 export interface CreateWorkerOptions {

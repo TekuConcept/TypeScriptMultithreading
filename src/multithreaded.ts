@@ -545,6 +545,8 @@ function createWorkerContext(
             parentPort!.on('message', handler),
         offMessage: (handler: ((value: any) => void)) =>
             parentPort!.off('message', handler),
+        keepalive: () => parentPort!.ref(),
+        finish: () => parentPort!.unref(),
     }
 }
 

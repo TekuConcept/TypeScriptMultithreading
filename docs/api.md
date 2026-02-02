@@ -293,6 +293,9 @@ interface WorkerContext {
     ): void
     onMessage(handler: (value: any) => void): void
     offMessage(handler: (value: any) => void): void
+
+    keepalive(): void
+    finish(): void
 }
 ```
 
