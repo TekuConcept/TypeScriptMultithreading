@@ -548,6 +548,8 @@ function attachLifecycle(worker: ThreadedWorker) {
         if (obs.instance.onWorkerCreated)
             obs.instance.onWorkerCreated(worker)
     }
+
+    worker.instance.on('exit', () => removeWorker(worker))
 }
 
 function attachAsyncValueLifecycle(
