@@ -173,6 +173,20 @@ Multithreaded.terminateWorkers(w => w.id === 'worker-1')
 
 ---
 
+#### `terminate(worker): void`
+
+Forcefully terminate the provided worker.
+
+Use this for immediate shutdown. For graceful shutdowns, send a custom message and allow the worker to exit voluntarily.
+
+**WARNING:** Prefer this over `w.instance.terminate()` to avoid putting Multithreaded in a bad state.
+
+```ts
+Multithreaded.terminate(w)
+```
+
+---
+
 #### `detachWorkers(selector?): void`
 
 Detach workers from internal management without terminating them.
@@ -181,6 +195,20 @@ Detached workers continue running independently and will no longer keep the main
 
 ```ts
 Multithreaded.detachWorkers()
+```
+
+---
+
+#### `detach(worker): void`
+
+Detach the provided worker from internal management without terminating it.
+
+The detached worker continues running independently and will no longer keep the main thread alive.
+
+**WARNING:** Prefer this over `w.instance.unref()` to avoid putting Multithreaded in a bad state.
+
+```ts
+Multithreaded.detach()
 ```
 
 

@@ -361,6 +361,14 @@ export function terminateWorkers(
 }
 
 /**
+ * Terminate a specific worker.
+ * @param worker The worker to terminate.
+ */
+export function terminate(
+    worker: ThreadedWorker
+): void { terminateWorkers(w => w === worker) }
+
+/**
  * Detach workers matching the selector from the
  * internal worker list without terminating them.
  * If no selector is provided, detaches all workers.
@@ -383,6 +391,15 @@ export function detachWorkers(
         worker.instance.unref()
     }
 }
+
+/**
+ * Detach a specific worker from the internal worker list
+ * without terminating it.
+ * @param worker The worker to detach.
+ */
+export function detach(
+    worker: ThreadedWorker
+): void { detachWorkers(w => w === worker) }
 
 /**
  * Get the worker context when running inside a worker thread.
