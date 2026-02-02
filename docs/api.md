@@ -280,7 +280,7 @@ interface ThreadedWorker {
 
 Provided to worker functions to enable messaging and access user data.
 
-**Note:** memory for user data is not shared between threads. Any changes to user data within a worker thread will not be reflected on the main thread.
+**Note:** memory for user data is generally not shared between threads. Any changes to user data within a worker thread will not be reflected on the main thread. `SharedArrayBuffer` is the exception to this limitation.
 
 ```ts
 interface WorkerContext {
