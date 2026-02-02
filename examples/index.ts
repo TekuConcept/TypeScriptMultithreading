@@ -32,7 +32,7 @@ class MessageObserver implements IThreadObserver {
     ) { console.log(`[main] exit from ${worker.id}:`, code) }
 }
 
-Multithreaded.main(() => {
+Multithreaded.main(async () => {
     console.log('[main] started')
     Multithreaded.bindObserverAll(new MessageObserver())
 
@@ -56,6 +56,25 @@ Multithreaded.main(() => {
     // independent messages to each worker instance
     w1.post({ type: 'ping', n: 1 })
     w2.post({ type: 'ping', n: 2 })
+
+    const r1 = await Multithreaded.asyncValue<number>(
+        (data) => {
+            // Simulate some heavy computation
+            let sum = 0
+            for (let i = 0; i < 10; i++)
+                sum += i
+            return sum + (data?.offset || 0)
+        },
+        { data: { offset: 42 } },
+    )
+
+    const r2 = await Multithreaded.asyncValueFile<number>(
+        path.resolve(__dirname, 'value-worker.ts'),
+        undefined,
+        { data: { offset: 50 } },
+    )
+
+    console.log('[main] asyncValue results:', r1, r2)
 
     setTimeout(() => Multithreaded.terminateWorkers(), 1500)
 })

@@ -101,7 +101,7 @@ Multithreaded.addWorkerFile(
 
 #### `asyncValue(fn, options?): AbortablePromise`
 
-Creates a new worker thread internally, which executes an inline function. This may be called from both the main thread and worker threads.
+Creates a new worker thread internally, which executes an inline function and returns its corresponding value. This may be called from both the main thread and worker threads.
 
 **Note**: `fn` must be self-contained. It cannot reference other functions outside its scope.
 
@@ -117,6 +117,33 @@ Creates a new worker thread internally, which executes an inline function. This 
 ```ts
 Multithreaded.asyncValue<number>(
     (offset) => return offset + 8,
+    { data: 42 }
+)
+    .timeout(15_000)
+    .then(result => console.log(`Not to ${result}!`))
+    .catch(e => console.error(e))
+```
+
+---
+
+#### `asyncValueFile(filename, relativeTo?, options?): AbortablePromise`
+
+Creates a new worker thread internally, which executes a file's target export function and returns its corresponding value. This may be called from both the main thread and worker threads.
+
+**Parameters**
+
+* `filename` — Path to the worker entry file
+* `relativeTo` - Optional base directory for resolving the file
+* `options` — Optional configuration (initial user data, target)
+
+**Throws**
+
+* If the file cannot be resolved
+
+```ts
+Multithreaded.asyncValueFile<number>(
+    (offset) => return offset + 8,
+    undefined,
     { data: 42 }
 )
     .timeout(15_000)

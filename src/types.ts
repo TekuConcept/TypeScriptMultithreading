@@ -71,6 +71,13 @@ export interface CreateWorkerOptions {
 export interface AsyncValueOptions {
     /** User-defined data to pass to the worker. */
     data?: any
+    /**
+     * The name of the export to invoke.
+     * Defaults to "default".
+     * 
+     * (Not used with the asyncValue function)
+     */
+    exportName?: string
 }
 
 export interface Handlers {
@@ -100,4 +107,10 @@ export type WorkerFunction = (ctx: WorkerContext) => void
 /**
  * A function that returns a value of type T.
  */
-export type ValueFunction<T> = (data?: any) => T
+export type ValueFunction<T> = (data?: any) => T | Promise<T>
+
+export enum MTMessageType {
+    Result = 'mt:result',
+    Error = 'mt:error',
+    Ack = 'mt:ack',
+}
