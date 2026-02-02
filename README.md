@@ -96,4 +96,6 @@ Multithreaded.main(() => {
 })
 ```
 
-See the [API doc](./docs/api.md) for a brief overview of functions and types. For more examples and recipes, have a look through the [example docs](./docs/examples/index.md).
+See the [API doc](./docs/api.md) for a brief overview of functions and types.  
+For more examples and recipes, have a look through the [example docs](./docs/examples/index.md).  
+To report an issue or suggest a feature, visit the [GitHub repo](https://github.com/TekuConcept/TypeScriptMultithreading).
