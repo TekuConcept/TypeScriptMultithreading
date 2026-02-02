@@ -380,6 +380,7 @@ export function detachWorkers(
     for (const worker of toDetach) {
         const idx = _workers.indexOf(worker)
         if (idx >= 0) _workers.splice(idx, 1)
+        worker.instance.unref()
     }
 }
 
