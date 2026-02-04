@@ -337,6 +337,14 @@ export function getWorkers(): ThreadedWorker[]
 { return _workers.slice() }
 
 /**
+ * Get a specific worker by its ID.
+ * @param id The worker ID used during creation.
+ * @returns The worker instance, or undefined if not found.
+ */
+export function getWorker(id: string): ThreadedWorker | undefined
+{ return _workers.find(w => w.id === id) }
+
+/**
  * Terminate workers matching the selector.
  * If no selector is provided, terminates all workers.
  * 
@@ -428,8 +436,11 @@ export const Multithreaded = {
     asyncValue,
     asyncValueFile,
     getWorkers,
+    getWorker,
     terminateWorkers,
+    terminate,
     detachWorkers,
+    detach,
     workerContext,
 } as const
 
@@ -523,8 +534,10 @@ function createWorkerInstance(
             msg: any,
             transferList?: readonly Transferable[],
         ) => worker.postMessage(msg, transferList),
-        onMessage: (handler: (value: any) => void) =>
-            worker.on('message', handler),
+        onMessage: (handler: (value: any) => void) => {
+            worker.on('message', handler)
+            return () => worker.off('message', handler)
+        },
         offMessage: (handler: (value: any) => void) =>
             worker.off('message', handler),
     }
@@ -541,8 +554,10 @@ function createWorkerContext(
             msg: any,
             transferList?: readonly Transferable[],
         ) => parentPort!.postMessage(msg, transferList),
-        onMessage: (handler: ((value: any) => void)) =>
-            parentPort!.on('message', handler),
+        onMessage: (handler: ((value: any) => void)) => {
+            parentPort!.on('message', handler)
+            return () => parentPort!.off('message', handler)
+        },
         offMessage: (handler: ((value: any) => void)) =>
             parentPort!.off('message', handler),
         keepalive: () => parentPort!.ref(),

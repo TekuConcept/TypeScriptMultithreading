@@ -62,8 +62,10 @@ function createWorkerContext(
         id,
         userData,
         post: (msg: any) => parentPort!.postMessage(msg),
-        onMessage: (handler: ((value: any) => void)) =>
-            parentPort!.on('message', handler),
+        onMessage: (handler: ((value: any) => void)) => {
+            parentPort!.on('message', handler)
+            return () => parentPort!.off('message', handler)
+        },
         offMessage: (handler: ((value: any) => void)) =>
             parentPort!.off('message', handler),
         keepalive: () => parentPort!.ref(),

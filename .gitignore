@@ -1,3 +1,9 @@
+# Temporary folders
+/old
+*/**/old
+/sandbox
+*/**/sandbox
+
 # Logs
 logs
 *.log

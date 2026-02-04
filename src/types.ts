@@ -16,7 +16,7 @@ export interface ThreadedWorker {
      * Register a message handler for messages from the worker.
      * See also `IThreadObserver.onMessage()`.
      */
-    onMessage: (handler: (value: any) => void) => void
+    onMessage: (handler: (value: any) => void) => MessageOffHandle
     /** Unregister a message handler. */
     offMessage: (handler: (value: any) => void) => void
 }
@@ -65,7 +65,7 @@ export interface WorkerContext {
      */
     post: (msg: any, transferList?: readonly Transferable[]) => void
     /** Register a message handler for messages from the main thread. */
-    onMessage: (handler: (value: any) => void) => void
+    onMessage: (handler: (value: any) => void) => MessageOffHandle
     /** Unregister a message handler. */
     offMessage: (handler: (value: any) => void) => void
     /**
@@ -146,6 +146,12 @@ export type WorkerFunction = (ctx: WorkerContext) => void
  * A function that returns a value of type T.
  */
 export type ValueFunction<T> = (data?: any) => T | Promise<T>
+
+/**
+ * Remove a message listener handle.
+ * Returned by onMessage().
+ */
+export type MessageOffHandle = () => void
 
 export enum MTMessageType {
     Result = 'mt:result',

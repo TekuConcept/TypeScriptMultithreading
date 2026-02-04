@@ -159,6 +159,12 @@ Returns a list of all currently managed workers.
 
 ---
 
+#### `getWorker(id): ThreadedWorker | undefined`
+
+Returns a worker by id if it exists.
+
+---
+
 #### `terminateWorkers(selector?): void`
 
 Forcefully terminate workers.
@@ -269,7 +275,7 @@ interface ThreadedWorker {
         msg: any,
         transferList: readonly Transferable[]
     ): void
-    onMessage(handler: (value: any) => void): void
+    onMessage(handler: (value: any) => void): MessageOffHandle
     offMessage(handler: (value: any) => void): void
 }
 ```
@@ -291,7 +297,7 @@ interface WorkerContext {
         msg: any,
         transferList: readonly Transferable[]
     ): void
-    onMessage(handler: (value: any) => void): void
+    onMessage(handler: (value: any) => void): MessageOffHandle
     offMessage(handler: (value: any) => void): void
 
     keepalive(): void
